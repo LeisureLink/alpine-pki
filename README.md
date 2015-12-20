@@ -50,7 +50,6 @@ docker run -it --rm \
 NOTE: we set the environment variable `PKI_ALTERNATE_IP` to the addresses where we've got the container ports mapped. This can be useful depending on the container networking strategy.
 
 NOTE: we set the environment variable `PKI_ALTERNATE_NAMES` to reflect the _host names_ various other parties may refer to when connecting to the container.
-```
 
 Sample output:
 
