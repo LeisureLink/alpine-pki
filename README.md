@@ -32,7 +32,7 @@ On startup, the following occurs:
 `00-init-pki` can only be effective if:
 * the environment variable `PKI_SUBJECT` is specified,
 * **and** if a volume is mounted to `/var/pki`
-* **and** another process, probably on the docker host, is waiting for `.csr` files to arrive in the mounted directory. See `leisurelink/alpine-pki-helper` for a docker image that satisfies this last requirement.
+* **and** another process, probably on the docker host, is waiting for `.csr` files to arrive in the mounted directory. See [`leisurelink/alpine-pki-helper`](https://github.com/LeisureLink/alpine-pki-helper) for a docker image that satisfies this last requirement.
 
 
 ### Example
