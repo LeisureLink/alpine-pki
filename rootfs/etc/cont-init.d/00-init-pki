@@ -1,0 +1,121 @@
+#!/usr/bin/with-contenv sh
+
+[ "${DEBUG}" != "" ] && set -x
+
+pki_mount=${PKI_MOUNT_DIR:-/var/pki}
+pki_root=${PKI_ROOT_DIR:-/etc/pki}
+pki_key_bits=${PKI_KEY_BITS:-2048}
+pki_max_wait=${PKI_MAX_WAIT:-30}
+
+mkdir -p ${pki_mount} ${pki_root}
+
+if [ ! -f ${pki_root}/key.pem ]; then
+  openssl genrsa -out ${pki_root}/key.pem ${pki_key_bits}
+  chmod 0440 ${pki_root}/key.pem
+  printf 'Created private key %s and made it owner readonly.\n' ${pki_root}/key.pem
+fi
+
+gen_alt_names() {
+cat << EOF > ${pki_root}/openssl.cnf
+[ req_distinguished_name ]
+countryName                     = Country Name (2 letter code)
+stateOrProvinceName             = State or Province Name
+localityName                    = Locality Name
+0.organizationName              = Organization Name
+organizationalUnitName          = Organizational Unit Name
+commonName                      = Common Name
+emailAddress                    = Email Address
+
+countryName_default             =
+stateOrProvinceName_default     =
+localityName_default            =
+0.organizationName_default      =
+organizationalUnitName_default  =
+commonName                      =
+emailAddress_default            =
+
+[ req ]
+default_bits   = 2048
+distinguished_name  = req_distinguished_name
+string_mask    = utf8only
+default_md     = sha256
+req_extensions = v3_req
+
+[ v3_req ]
+basicConstraints = CA:FALSE
+keyUsage         = nonRepudiation, digitalSignature, keyEncipherment
+subjectAltName   = @alt_names
+
+[alt_names]
+IP.1 = $(getent hosts ${HOSTNAME} | awk '{print $1}')
+EOF
+
+  printf '\n%s\n\n[alt_names]\nIP.1 = %s\n' "${PKI_SUBJECT}" $(getent hosts ${HOSTNAME} | awk '{print $1}')
+  if [[ ! -z ${PKI_ALTERNATE_IP} ]]; then
+    let counter=2
+    for ip in $(echo ${PKI_ALTERNATE_IP} | tr ',' ' '); do
+      printf 'IP.%d = %s\n' $counter $ip
+      printf 'IP.%d = %s\n' $counter $ip >> ${pki_root}/openssl.cnf
+      let counter+=1
+    done
+  fi
+
+  printf 'DNS.1 = %s\n' $(hostname -f)
+  printf 'DNS.1 = %s\n' $(hostname -f) >> ${pki_root}/openssl.cnf
+  if [[ ! -z ${PKI_ALTERNATE_NAMES} ]]; then
+    let counter=2
+    for n in $(echo ${PKI_ALTERNATE_NAMES} | tr ',' ' '); do
+      printf 'DNS.%d = %s\n' $counter $n
+      printf 'DNS.%d = %s\n' $counter $n >> ${pki_root}/openssl.cnf
+      let counter+=1
+    done
+  fi
+}
+
+await_file() {
+  local file=$1
+  local counter=0;
+  while [ ! -f "$file" ]; do
+    printf '.'
+    inotifywait -qqt 1 -e create -e moved_to "$(dirname $file)"
+    let counter+=1
+    if [ ${counter} -gt ${pki_max_wait} ]; then
+      printf '\nERROR: Wait for %s timed out after %d seconds.\n' ${file} ${pki_max_wait} >&2
+      exit 1
+    fi
+  done
+  printf '\n'
+}
+
+if [ "${PKI_SUBJECT}" == "" ]; then
+  printf 'PKI subject not supplied; not generating a certificate request for this container.\nIf operating in an envvironment that requires TLS, specify a PKI subject name in an environment variable PKI_SUBJECT.\n'
+  exit 0
+fi
+
+if [ ! -f ${pki_root}/cert.pem ]; then
+  printf 'Certificate not found; generating a certificate request.\n'
+  gen_alt_names
+  cmd="openssl req -new -config ${pki_root}/openssl.cnf -utf8 -subj "\"${PKI_SUBJECT}\"" -key ${pki_root}/key.pem -out ${pki_mount}/$(hostname -f).csr"
+  eval $cmd
+
+  printf 'Placed certificate request in %s; waiting for a signed cert.' ${pki_mount}
+  await_file ${pki_mount}/$(hostname -f).crt
+  mv ${pki_mount}/$(hostname -f).crt ${pki_root}/cert.pem
+  chmod 0440 ${pki_root}/cert.pem
+  printf 'Moved signed cert to %s and made it owner readonly.\n' ${pki_root}/cert.pem
+
+  rm -f ${pki_mount}/$(hostname -f).csr
+  printf 'Removed certificate request from %s.\n' ${pki_mount}
+
+  printf 'Waiting for the CA cert.' ${pki_mount}
+  await_file ${pki_mount}/$(hostname -f).ca
+  mv ${pki_mount}/$(hostname -f).ca ${pki_root}/ca.pem
+  chmod 0440 ${pki_root}/ca.pem
+  printf 'Moved CA cert to %s and made it owner readonly.\n' ${pki_root}/ca.pem
+
+  # correct the ownership of the files in pki_root; UID:GID can differ from
+  # container to container; we do this because the expectation is that the
+  # pki_mount is a docker volume mapped to the host or another container.
+  chown -R root:root ${pki_root}
+fi
+
