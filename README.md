@@ -53,7 +53,8 @@ NOTE: we set the environment variable `PKI_ALTERNATE_NAMES` to reflect the _host
 ```
 
 Sample output:
-```
+
+```bash
 ...
 cont-init.d] 00-init-pki: executing...
 Generating RSA private key, 2048 bit long modulus
@@ -82,7 +83,8 @@ Moved CA cert to /etc/pki/ca.pem and made it owner readonly.
 ```
 
 And the certificate request:
-```
+
+```bash
 openssl req -noout -text -in c74bdf0d3ad4.examples.leisurelink.local.csr
 Certificate Request:
     Data:
